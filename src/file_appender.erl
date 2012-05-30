@@ -79,7 +79,7 @@ handle_event({change_level, Level}, State) ->
     {ok, State2};
 handle_event({log,LLog}, State) ->
     ?LOG2("handl_event:log = ~p~n",[LLog]),
-    do_log(LLog, State),
+    _WasLogged = do_log(LLog, State),
     Res = check_rotation(State),
     {ok, Res}.
 
@@ -92,6 +92,13 @@ handle_call({change_format, Format}, State) ->
 handle_call({change_level, Level}, State) ->
     State2 = State#file_appender{level = Level},
     ?LOG2("Changed level to ~p~n",[Level]),
+    {ok, ok, State2};
+handle_call({change_filename, Fname}, #file_appender{dir=Dir, suffix=Suf} = State) ->
+    ok = file:close(State#file_appender.fd),
+    File = Dir ++ "/" ++ Fname ++ "." ++ Suf,
+    {ok, Fd} = file:open(File, ?FILE_OPTIONS),
+    State2 = State#file_appender{file_name = Fname, fd = Fd},
+    ?LOG2("Changed filename to ~p~n",[File]),
     {ok, ok, State2};
 handle_call(_Request, State) ->
     Reply = ok,
@@ -116,13 +123,14 @@ do_log(#log{level = L} = Log,#file_appender{fd = Fd, level=Level, format=Format}
     case ToLog of
 	true ->
 	    M = log_formatter:format(Log, Format),
-	    file:write(Fd, M);
+	    file:write(Fd, M),
+            true;
 	false ->
-	    ok
+	    false
     end;
 do_log(_Other, _State) ->
     ?LOG2("unknown level ~p~n",[_Other]),
-    ok.
+    false.
 
 rotate(#file_appender{fd = Fd, dir=Dir,  file_name=Fn, counter=Cntr, rotation=Rot, suffix=Suf, log_type=Ltype, level=Level, format=Format} = _S) ->
     file:close(Fd),
@@ -143,6 +151,7 @@ rotate_file(FileBase, _Index, Suffix) ->
 
 % Check if the file needs to be rotated
 % ignore in case of if log type is set to time instead of size	    
+% check_rotation(false, State) ->
 check_rotation(State) ->
     #file_appender{dir=Dir, file_name=Fname, log_type = #log_type{type=T, max=Max}, suffix=Suf} = State,
     case T of
